@@ -61,9 +61,19 @@ def build_database(index_filepath, config_json, device, huggingface_dataset, int
         elif "bbc" in huggingface_dataset:
             text = load_dataset("SetFit/bbc-news")["train"]
         else:
-            raise Exception("please specify a valid huggingface dataset")
-    
-        text_tokenized = text.map(tokenize_function, batched=True, num_proc=32, remove_columns=["text"])
+            # Load local JSONL file instead of HuggingFace dataset
+            if os.path.exists(huggingface_dataset) and huggingface_dataset.endswith(".jsonl"):
+                print(f"📄 Loading local dataset from {huggingface_dataset}")
+                with open(huggingface_dataset, "r", encoding="utf-8") as f:
+                    lines = [json.loads(line) for line in f if line.strip()]
+                texts = [x["text"] for x in lines if "text" in x]
+
+                from datasets import Dataset
+                text = Dataset.from_dict({"text": texts})
+            else:
+                raise Exception("please specify a valid huggingface dataset or local JSONL file")
+
+        text_tokenized = text.map(tokenize_function, batched=True, num_proc=4, remove_columns=["text"])
         text_tokenized = [sample["input_ids"] for sample in text_tokenized if sample["input_ids"]!=[]]
         text_tokenized = [y for x in text_tokenized for y in x] #flatten it.
         if intermediate_results_dir != "": #if you want to save the intermediate results
@@ -101,6 +111,8 @@ def build_database(index_filepath, config_json, device, huggingface_dataset, int
     # Get a random sample of the the chunk indexes
     n_train = int(0.95*n_chunks) #like nvidia megatron we train on 95% of the data
     random_sample = np.random.choice(np.arange(n_chunks), size=[n_train], replace=False)
+
+
 
     # Train the index to store the keys
     with monit.section('Train index'):

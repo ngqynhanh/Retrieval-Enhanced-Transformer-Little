@@ -1,3 +1,14 @@
+# python dataset.py ^
+# --train_index_filepath datasets/retroli_phukhoa.index ^
+# --val_index_filepath datasets/retroli_phukhoa.index ^
+# --train_dataset_filepath datasets/retroli_train.jsonl ^
+# --val_dataset_filepath datasets/retroli_val.jsonl ^
+# --config_filepath configs/retro_small_model_wikitext103-gpt2-10.json ^
+# --flattened_text_tokenized_path_train None ^
+# --flattened_text_tokenized_path_val None ^
+# --huggingface_dataset custom_phukhoa ^
+# --embedding_type multi-qa-mpnet-base-dot-v1 ^
+# --truncation True
 import json
 from pathlib import Path
 import argparse
@@ -17,6 +28,9 @@ from transformers import GPT2Tokenizer
 torch.random.manual_seed(42)
 np.random.seed(42)
 random.seed(42)
+import pandas as pd
+from datasets import Dataset as HFDataset
+
 def build_dataset(train_index_filepath, val_index_filepath, 
                 train_dataset_filepath, val_dataset_filepath, device, config_json, 
                 flattened_text_tokenized_path_train, flattened_text_tokenized_path_val,
@@ -138,6 +152,59 @@ def build_dataset(train_index_filepath, val_index_filepath,
         if train_dataset_filepath != "":
             text_train_seq = load_dataset("SetFit/bbc-news", split=f'train[-{trainseq_split}%:]')
             text_train_retdb = load_dataset("SetFit/bbc-news", split=f'train[:{train_retdb_split}%]')
+    elif "custom_phukhoa" in huggingface_dataset:
+        print("📘 Loading custom dataset: datasets/passages.jsonl ...")
+        with open("datasets/passages.jsonl", encoding="utf-8") as f:
+            data = []
+            for line in f:
+                try:
+                    j = json.loads(line)
+                    if "text" in j and j["text"].strip():
+                        data.append(j["text"])
+                except Exception:
+                    continue
+
+        # ✅ Giới hạn trước khi chia để tránh tràn RAM
+        MAX_SAMPLES = 5000
+        if len(data) > MAX_SAMPLES:
+            print(f"⚠️ Giới hạn {MAX_SAMPLES} mẫu để tiết kiệm RAM (gốc có {len(data)}).")
+            data = data[:MAX_SAMPLES]
+
+        # chia tập
+        split_ratio = 0.8
+        train_size = int(len(data) * split_ratio)
+        text_train_seq = data[:train_size]
+        text_train_retdb = data[train_size:]
+        text_val = text_train_seq[:min(100, len(text_train_seq))]
+        text_train = text_train_seq 
+
+        # tokenization (dạng list comprehension)
+        def quick_tokenize(texts):
+            out = []
+            for t in texts:
+                try:
+                    tok = gpt2_tokenizer(
+                        re.sub(' +', ' ', normalizer.normalize_str(t)),
+                        truncation=truncation,
+                        add_special_tokens=False
+                    )["input_ids"]
+                    if tok:
+                        out.append(tok)
+                except Exception:
+                    continue
+            return [y for x in out for y in x]  # flatten
+
+        print("🔹 Tokenizing (train_seq)...")
+        text_train_tokenized = quick_tokenize(text_train_seq)
+        print("🔹 Tokenizing (retrieval_db)...")
+        train_retrieval_database_tokens = quick_tokenize(text_train_retdb)
+        print("✅ Tokenization done. Train:", len(text_train_tokenized), "tokens")
+
+        # Lưu tạm vào RAM, không dùng .map()
+        text_train_seq = [t for t in text_train_seq]
+        text_train_retdb = [t for t in text_train_retdb]
+        text_val = [t for t in text_val]
+
     else:
         try:
             text = load_dataset(huggingface_dataset, split='train')
@@ -157,8 +224,17 @@ def build_dataset(train_index_filepath, val_index_filepath,
             with open(train_retrieval_database_tokens_path, "rb") as fb:
                 train_retrieval_database_tokens = pickle.load(fb)
         else:
-            text_train_tokenized = text_train_retdb.map(tokenize_function, batched=True, num_proc=32, remove_columns=[text_type])
-            text_train_tokenized = [sample["input_ids"] for sample in text_train_tokenized if sample["input_ids"]!=[]]
+            os.makedirs(flattened_text_tokenized_path_train, exist_ok=True)
+            train_retrieval_database_tokens_path = flattened_text_tokenized_path_train + "/train_retrieval_database_tokens"
+            traintok_file = Path(train_retrieval_database_tokens_path)
+
+            if text_train_tokenized is None and not traintok_file.is_file():
+                # chỉ token hóa nếu chưa có sẵn hoặc chưa lưu file
+                text_train_tokenized = text_train_retdb.map(tokenize_function, batched=True, num_proc=1, remove_columns=[text_type])
+            # Sau khi token hóa
+            print("🔹 Cleaning tokenized samples...")
+            text_train_tokenized = [sample for sample in text_train_tokenized if isinstance(sample, list) and len(sample) > 0]
+            print(f"✅ Cleaned {len(text_train_tokenized)} tokenized samples.")
             text_train_tokenized = [y for x in text_train_tokenized for y in x] #flatten it.
             train_retrieval_database_tokens = text_train_tokenized
             with open(train_retrieval_database_tokens_path, "wb") as fp:
@@ -171,8 +247,20 @@ def build_dataset(train_index_filepath, val_index_filepath,
             with open(train_seq_tokens_path, "rb") as fb:
                 text_train_tokenized = pickle.load(fb)
         else:
-            text_train_tokenized = text_train_seq.map(tokenize_function, batched=True, num_proc=32, remove_columns=[text_type])
-            text_train_tokenized = [sample["input_ids"] for sample in text_train_tokenized if sample["input_ids"]!=[]]
+            print("🔹 Tokenizing text_train_seq ...")
+            text_train_tokenized = []
+            for sample in text_train_seq:
+                try:
+                    toks = tokenize_function({"text": [sample["text"]]})
+                    if toks and "input_ids" in toks:
+                        text_train_tokenized.extend(toks["input_ids"])
+                except Exception as e:
+                    continue
+            print(f"✅ Tokenized {len(text_train_tokenized)} samples.")
+            # Sau khi token hóa
+            print("🔹 Cleaning tokenized samples...")
+            text_train_tokenized = [sample for sample in text_train_tokenized if isinstance(sample, list) and len(sample) > 0]
+            print(f"✅ Cleaned {len(text_train_tokenized)} tokenized samples.")
             text_train_tokenized = [y for x in text_train_tokenized for y in x] #flatten it.
             with open(train_seq_tokens_path, "wb") as fp:
                 pickle.dump(text_train_tokenized, fp)
@@ -194,6 +282,8 @@ def build_dataset(train_index_filepath, val_index_filepath,
             sample_offsets_train.append(i)
             i += chunks_per_sample * chunk_len
         
+
+
         sequences_train = []
         is_dump_segments = False  #use to split dumps into multiple files to avoid excessive memory use issue
         dump_sequence_segment = []
@@ -240,8 +330,18 @@ def build_dataset(train_index_filepath, val_index_filepath,
         else:
             # write out the json
             print("Gathering neightbors done")
-            with open(train_dataset_filepath, 'w') as f:
-                f.write(json.dumps(sequences_train))
+            with open(train_dataset_filepath, 'w', encoding='utf-8') as f:
+                for sample in sequences_train:
+                # Each sample is a tuple: (src, tgt, neighbors, D)
+                # Convert to dict for clarity
+                    obj = {
+                    "src": sample[0],
+                    "tgt": sample[1],
+                    "neighbors": sample[2],
+                    "D": sample[3]
+                    }
+                    json.dump(obj, f, ensure_ascii=False)
+                    f.write("\n")
     
     # Validation json
     if val_dataset_filepath != "": # so we want to save a val dataset
@@ -252,8 +352,14 @@ def build_dataset(train_index_filepath, val_index_filepath,
             with open(val_retrieval_database_tokens_path, "rb") as fb:
                 val_retrieval_database_tokens = pickle.load(fb)
         else:
-            text_train_tokenized = text_train.map(tokenize_function, batched=True, num_proc=32, remove_columns=[text_type])
-            text_train_tokenized = [sample["input_ids"] for sample in text_train_tokenized if sample["input_ids"]!=[]]
+            text_train = HFDataset.from_dict({"text": text_train_seq})
+            text_val = HFDataset.from_dict({"text": text_val})
+            text_retrieval = HFDataset.from_dict({"text": text_train_retdb})
+            text_train_tokenized = text_train.map(tokenize_function, batched=True, num_proc=8, remove_columns=[text_type])
+            # Sau khi token hóa
+            print("🔹 Cleaning tokenized samples...")
+            text_train_tokenized = [sample for sample in text_train_tokenized if isinstance(sample, list) and len(sample) > 0]
+            print(f"✅ Cleaned {len(text_train_tokenized)} tokenized samples.")
             text_train_tokenized = [y for x in text_train_tokenized for y in x] #flatten it.
             val_retrieval_database_tokens = text_train_tokenized
             with open(val_retrieval_database_tokens_path, "wb") as fp:
@@ -265,13 +371,17 @@ def build_dataset(train_index_filepath, val_index_filepath,
             with open(val_seq_tokens_path, "rb") as fb:
                 text_val_tokenized = pickle.load(fb)
         else:
-            text_val_tokenized = text_val.map(tokenize_function, batched=True, num_proc=32, remove_columns=[text_type])
+            if isinstance(text_val, list):
+                text_val = HFDataset.from_dict({"text": text_val})
+            text_val_tokenized = text_val.map(tokenize_function, batched=True, num_proc=8, remove_columns=[text_type])
             text_val_tokenized = [sample["input_ids"] for sample in text_val_tokenized if sample["input_ids"]!=[]]
             text_val_tokenized = [y for x in text_val_tokenized for y in x]
             text_val_tokenized = {huggingface_dataset: {"text_val_tokenized": text_val_tokenized}} #this is so you can create several validation datasets from the same index at once if you want.
             #the idea was that in each "elif xx in huggingface dataset" you would tokenize and flatten the text, then add a key to this dict. since we don't do that and it would lead to more lines of code, I reverted these changes.
             with open(val_seq_tokens_path, "wb") as fp:
                     pickle.dump(text_val_tokenized, fp)
+
+
 
     if val_dataset_filepath != "": # so we want to save a val dataset
         val_index = RetroIndex(device, val_index_filepath, config_json,embedding_type)
@@ -311,8 +421,19 @@ def build_dataset(train_index_filepath, val_index_filepath,
                 sequences_val.append((sample[:-1], sample[1:], neighbors, D))
                 
             path = val_dataset_filepath.replace(".json", "-"+str(key)+".json")
-            with open(path, 'w') as f:
-                f.write(json.dumps(sequences_val))
+            print(f"Writing validation dataset as JSONL to {path}...")
+            with open(path, 'w', encoding='utf-8') as f:
+                for sample in sequences_val:
+                    obj = {
+                    "src": sample[0],
+                    "tgt": sample[1],
+                    "neighbors": sample[2],
+                    "D": sample[3]
+                    }
+                    json.dump(obj, f, ensure_ascii=False)
+                    f.write("\n")
+            print(f"💾 Validation dataset written line-by-line to {path}")
+    print(f"🎉 Dataset build completed! Train saved to: {train_dataset_filepath}")
     
 class Dataset(PyTorchDataset):
     """
@@ -386,3 +507,4 @@ if __name__ == '__main__':
                     flattened_text_tokenized_path_train=args.flattened_text_tokenized_path_train, 
                     flattened_text_tokenized_path_val=args.flattened_text_tokenized_path_val, 
                     huggingface_dataset=args.huggingface_dataset, truncation=truncation, embedding_type = args.embedding_type,trainseq_split=trainseq_split)
+    
