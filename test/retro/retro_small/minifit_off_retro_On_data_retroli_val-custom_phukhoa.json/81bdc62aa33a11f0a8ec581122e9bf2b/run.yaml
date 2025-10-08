@@ -1,0 +1,66 @@
+comment: ''
+commit: 0ccd29a103dfff5aba16fc8ec91f682a0cf07cf0
+commit_message: push
+is_dirty: true
+load_run: null
+name: minifit_off_retro_On_data_retroli_val-custom_phukhoa.json
+notes: ''
+python_file: D:\Work\side-projects\rag-paper\rag-system\Retrieval-Enhanced-Transformer-Little\retro-li\train.py
+repo_remotes:
+- https://github.com/ngqynhanh/Retrieval-Enhanced-Transformer-Little.git
+start_step: 0
+tags:
+- minifit
+- val-custom
+- retro
+- 'On'
+- retroli
+- data
+- phukhoa.json
+- 'off'
+trial_date: '2025-10-07'
+trial_time: '12:00:12'
+uuid: 81bdc62aa33a11f0a8ec581122e9bf2b
+config_json:
+  batch_size: 128
+  chunk_len: 64
+  chunks_per_sample: 16
+  code_size: 64
+  d_emb: 768
+  d_ff: 3072
+  d_k: 64
+  d_model: 768
+  decoder_ca_layers:
+  - 5
+  - 8
+  - 11
+  dl_batch_size: 2
+  encoder_ca_layers:
+  - 0
+  epochs: 10
+  exclude_neighbor_span: 1
+  gpt2: 'True'
+  load_from_checkpoint: ''
+  minifit: 'True'
+  minifit_retdb_split: 85
+  n_centeroids: 1024
+  n_decoder_layers: 12
+  n_encoder_layers: 2
+  n_extra: 4
+  n_heads: 12
+  n_neighbors: 3
+  n_probe: 32
+  noise_coeff: 0.196
+  noisy_embed_neighbors: 'True'
+  normalize_bert: 'False'
+  optimizer: RAdam
+  optimizer_lr: 1.0
+  optimizer_warmup: 2000
+  quantizer: IndexFlatL2
+  retro: 'On'
+  skip_range: 4
+  true_retrofit: 'True'
+device: cpu
+random_seed: 42
+train_dataset_filepath: datasets/retroli_train.json
+val_dataset_filepath: datasets/retroli_val-custom_phukhoa.json

@@ -1,0 +1,39 @@
+=====================================================================================
+Layer (type:depth-idx)                                       Param #
+=====================================================================================
+DataParallel                                                 --
+├─RetroFittedGPT2: 1-1                                       --
+│    └─GPT2Model: 2-1                                        --
+│    │    └─Embedding: 3-1                                   (38,597,376)
+│    │    └─Embedding: 3-2                                   (786,432)
+│    │    └─Dropout: 3-3                                     --
+│    │    └─ModuleList: 3-4                                  (85,054,464)
+│    │    └─LayerNorm: 3-5                                   (1,536)
+│    └─NearestNeighborEncoder: 2-2                           --
+│    │    └─ModuleList: 3-6                                  (2,363,136)
+│    │    └─ModuleList: 3-7                                  4,726,336
+│    │    └─ModuleList: 3-8                                  9,446,400
+│    │    └─RMSNorm: 3-9                                     768
+│    └─ModuleList: 2-3                                       --
+│    │    └─ChunkedCrossAttention: 3-10                      (2,363,136)
+│    │    └─ChunkedCrossAttention: 3-11                      (2,363,136)
+│    │    └─ChunkedCrossAttention: 3-12                      (2,363,136)
+│    └─ModuleList: 2-4                                       --
+│    │    └─FeedForward: 3-13                                4,723,200
+│    │    └─FeedForward: 3-14                                4,723,200
+│    │    └─FeedForward: 3-15                                4,723,200
+│    │    └─FeedForward: 3-16                                4,723,200
+│    │    └─FeedForward: 3-17                                4,723,200
+│    │    └─FeedForward: 3-18                                4,723,200
+│    │    └─FeedForward: 3-19                                4,723,200
+│    │    └─FeedForward: 3-20                                4,723,200
+│    │    └─FeedForward: 3-21                                4,723,200
+│    │    └─FeedForward: 3-22                                4,723,200
+│    │    └─FeedForward: 3-23                                4,723,200
+│    │    └─FeedForward: 3-24                                4,723,200
+│    └─Linear: 2-5                                           38,647,633
+=====================================================================================
+Total params: 243,391,889
+Trainable params: 109,499,473
+Non-trainable params: 133,892,416
+=====================================================================================

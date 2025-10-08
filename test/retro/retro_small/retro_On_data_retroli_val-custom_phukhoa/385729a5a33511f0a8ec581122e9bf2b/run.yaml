@@ -1,0 +1,21 @@
+comment: ''
+commit: 0ccd29a103dfff5aba16fc8ec91f682a0cf07cf0
+commit_message: push
+is_dirty: true
+load_run: null
+name: retro_On_data_retroli_val-custom_phukhoa
+notes: ''
+python_file: D:\Work\side-projects\rag-paper\rag-system\Retrieval-Enhanced-Transformer-Little\retro-li\train.py
+repo_remotes:
+- https://github.com/ngqynhanh/Retrieval-Enhanced-Transformer-Little.git
+start_step: 0
+tags:
+- phukhoa
+- val-custom
+- retroli
+- 'On'
+- retro
+- data
+trial_date: '2025-10-07'
+trial_time: '11:22:22'
+uuid: 385729a5a33511f0a8ec581122e9bf2b

@@ -1,0 +1,23 @@
+comment: ''
+commit: 0ccd29a103dfff5aba16fc8ec91f682a0cf07cf0
+commit_message: push
+is_dirty: true
+load_run: null
+name: minifit_off_retro_On_data_retroli_val-custom_phukhoa.json
+notes: ''
+python_file: D:\Work\side-projects\rag-paper\rag-system\Retrieval-Enhanced-Transformer-Little\retro-li\train.py
+repo_remotes:
+- https://github.com/ngqynhanh/Retrieval-Enhanced-Transformer-Little.git
+start_step: 0
+tags:
+- val-custom
+- 'On'
+- retroli
+- retro
+- 'off'
+- data
+- phukhoa.json
+- minifit
+trial_date: '2025-10-07'
+trial_time: '11:53:52'
+uuid: 9ed2c694a33911f0a8ec581122e9bf2b

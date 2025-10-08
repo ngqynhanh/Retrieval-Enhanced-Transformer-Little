@@ -27,7 +27,7 @@
     "retro": "On",
     "gpt2": "True",
     "optimizer": "RAdam",
-    "load_from_checkpoint": "test/retro_small/true_retrofit/063df95ee39a11ee961800001049fe80/best-checkpoint-model.pt",
+    "load_from_checkpoint": "",
     "noisy_embed_neighbors": "True",
     "noise_coeff": 0.196,
     "true_retrofit": "True",

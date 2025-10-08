@@ -1,0 +1,560 @@
+diff --git a/datasets/debug.py b/datasets/debug.py
+index ff6ef33..cdb85a1 100644
+--- a/datasets/debug.py
++++ b/datasets/debug.py
+@@ -11,4 +11,6 @@ train_data = load_jsonl(train_dataset_filepath)
+ val_data = load_jsonl(val_dataset_filepath)
+ 
+ print("Train dataset length:", len(train_data))
+-print("Val dataset length:", len(val_data))
+\ No newline at end of file
++print("Val dataset length:", len(val_data))
++
++#test/retro_small/true_retrofit/063df95ee39a11ee961800001049fe80/best-checkpoint-model.pt
+\ No newline at end of file
+diff --git a/retro-li/configs/minifit/retro_small_model_wikitext103-gpt2-3.json b/retro-li/configs/minifit/retro_small_model_wikitext103-gpt2-3.json
+index a3da978..6928a42 100644
+--- a/retro-li/configs/minifit/retro_small_model_wikitext103-gpt2-3.json
++++ b/retro-li/configs/minifit/retro_small_model_wikitext103-gpt2-3.json
+@@ -27,7 +27,7 @@
+     "retro": "On",
+     "gpt2": "True",
+     "optimizer": "RAdam",
+-    "load_from_checkpoint": "test/retro_small/true_retrofit/934a20f4d6f511eea00700000c28fe80/best-checkpoint-model.pt",
++    "load_from_checkpoint": "",
+     "noisy_distance_metric": "False",
+     "minifit": "True"
+ }
+\ No newline at end of file
+diff --git a/retro-li/configs/minifit/retro_small_model_wikitext103-gpt2-coeff0196-neigh.json b/retro-li/configs/minifit/retro_small_model_wikitext103-gpt2-coeff0196-neigh.json
+index 0f793ef..d534268 100644
+--- a/retro-li/configs/minifit/retro_small_model_wikitext103-gpt2-coeff0196-neigh.json
++++ b/retro-li/configs/minifit/retro_small_model_wikitext103-gpt2-coeff0196-neigh.json
+@@ -27,7 +27,7 @@
+     "retro": "On",
+     "gpt2": "True",
+     "optimizer": "RAdam",
+-    "load_from_checkpoint": "test/retro_small/true_retrofit/063df95ee39a11ee961800001049fe80/best-checkpoint-model.pt",
++    "load_from_checkpoint": "",
+     "noisy_embed_neighbors": "True",
+     "noise_coeff": 0.196,
+     "true_retrofit": "True",
+diff --git a/retro-li/configs/retro_small_model_wikitext103-gpt2-coeff0196-neigh.json b/retro-li/configs/retro_small_model_wikitext103-gpt2-coeff0196-neigh.json
+index 69d8477..c51f108 100644
+--- a/retro-li/configs/retro_small_model_wikitext103-gpt2-coeff0196-neigh.json
++++ b/retro-li/configs/retro_small_model_wikitext103-gpt2-coeff0196-neigh.json
+@@ -30,8 +30,6 @@
+     "load_from_checkpoint": "",
+     "noisy_embed_neighbors": "True",
+     "noise_coeff": 0.196,
+-    "minifit": "False",
+-    "true_retrofit": "True",
+-    "train_dataset": "dataset.TokenDataset",
+-    "val_dataset": "dataset.TokenDataset"
++    "minifit": "True",
++    "true_retrofit": "True"
+ }
+\ No newline at end of file
+diff --git a/retro-li/dataset.py b/retro-li/dataset.py
+index 8b28f1a..3513ddb 100644
+--- a/retro-li/dataset.py
++++ b/retro-li/dataset.py
+@@ -1,9 +1,9 @@
+-# python dataset.py ^
++# python retro-li/dataset.py ^
+ # --train_index_filepath datasets/retroli_phukhoa.index ^
+ # --val_index_filepath datasets/retroli_phukhoa.index ^
+-# --train_dataset_filepath datasets/retroli_train.jsonl ^
+-# --val_dataset_filepath datasets/retroli_val.jsonl ^
+-# --config_filepath configs/retro_small_model_wikitext103-gpt2-10.json ^
++# --train_dataset_filepath datasets/retroli_train.json ^
++# --val_dataset_filepath datasets/retroli_val.json ^
++# --config_filepath retro-li/configs/retro_small_model_wikitext103-gpt2-10.json ^
+ # --flattened_text_tokenized_path_train None ^
+ # --flattened_text_tokenized_path_val None ^
+ # --huggingface_dataset custom_phukhoa ^
+@@ -25,12 +25,11 @@ from retro_index import RetroIndex
+ from datasets import load_dataset, concatenate_datasets
+ from tokenizers import normalizers
+ from transformers import GPT2Tokenizer
++from datasets import Dataset as HFDataset
++
+ torch.random.manual_seed(42)
+ np.random.seed(42)
+ random.seed(42)
+-import pandas as pd
+-from datasets import Dataset as HFDataset
+-
+ def build_dataset(train_index_filepath, val_index_filepath, 
+                 train_dataset_filepath, val_dataset_filepath, device, config_json, 
+                 flattened_text_tokenized_path_train, flattened_text_tokenized_path_val,
+@@ -153,57 +152,40 @@ def build_dataset(train_index_filepath, val_index_filepath,
+             text_train_seq = load_dataset("SetFit/bbc-news", split=f'train[-{trainseq_split}%:]')
+             text_train_retdb = load_dataset("SetFit/bbc-news", split=f'train[:{train_retdb_split}%]')
+     elif "custom_phukhoa" in huggingface_dataset:
+-        print("📘 Loading custom dataset: datasets/passages.jsonl ...")
+-        with open("datasets/passages.jsonl", encoding="utf-8") as f:
+-            data = []
+-            for line in f:
+-                try:
+-                    j = json.loads(line)
+-                    if "text" in j and j["text"].strip():
+-                        data.append(j["text"])
+-                except Exception:
++        # ✅ Load dữ liệu từ local JSONL thay vì HuggingFace
++        print("Loading local dataset: datasets/passages.jsonl")
++        local_path = Path("datasets/passages.jsonl")
++        if not local_path.exists():
++            raise FileNotFoundError(f"{local_path} not found!")
++
++        # đọc từng dòng JSONL (mỗi dòng là {"text": "..."} hoặc plain text line)
++        lines = []
++        with open(local_path, "r", encoding="utf-8") as f:
++            for ln in f:
++                ln = ln.strip()
++                if not ln:
+                     continue
+-
+-        # ✅ Giới hạn trước khi chia để tránh tràn RAM
+-        MAX_SAMPLES = 5000
+-        if len(data) > MAX_SAMPLES:
+-            print(f"⚠️ Giới hạn {MAX_SAMPLES} mẫu để tiết kiệm RAM (gốc có {len(data)}).")
+-            data = data[:MAX_SAMPLES]
+-
+-        # chia tập
+-        split_ratio = 0.8
+-        train_size = int(len(data) * split_ratio)
+-        text_train_seq = data[:train_size]
+-        text_train_retdb = data[train_size:]
+-        text_val = text_train_seq[:min(100, len(text_train_seq))]
+-        text_train = text_train_seq 
+-
+-        # tokenization (dạng list comprehension)
+-        def quick_tokenize(texts):
+-            out = []
+-            for t in texts:
+                 try:
+-                    tok = gpt2_tokenizer(
+-                        re.sub(' +', ' ', normalizer.normalize_str(t)),
+-                        truncation=truncation,
+-                        add_special_tokens=False
+-                    )["input_ids"]
+-                    if tok:
+-                        out.append(tok)
+-                except Exception:
+-                    continue
+-            return [y for x in out for y in x]  # flatten
+-
+-        print("🔹 Tokenizing (train_seq)...")
+-        text_train_tokenized = quick_tokenize(text_train_seq)
+-        print("🔹 Tokenizing (retrieval_db)...")
+-        train_retrieval_database_tokens = quick_tokenize(text_train_retdb)
+-        print("✅ Tokenization done. Train:", len(text_train_tokenized), "tokens")
+-
+-        # Lưu tạm vào RAM, không dùng .map()
+-        text_train_seq = [t for t in text_train_seq]
+-        text_train_retdb = [t for t in text_train_retdb]
+-        text_val = [t for t in text_val]
++                    # nếu là JSON object, lấy key "text" nếu có
++                    obj = json.loads(ln)
++                    if isinstance(obj, dict) and "text" in obj:
++                        lines.append(obj["text"])
++                    elif isinstance(obj, str):
++                        lines.append(obj)
++                    else:
++                        lines.append(str(obj))
++                except json.JSONDecodeError:
++                    # nếu không parse được JSON, coi cả dòng là text
++                    lines.append(ln)
++
++        print(f"✅ Loaded {len(lines)} passages from {local_path}")
++
++        # đưa vào dataset dạng HuggingFace-compatible
++        text_train_seq = HFDataset.from_dict({"text": lines})
++        text_train = text_train_seq
++        text_train_retdb = HFDataset.from_dict({"text": lines})
++        text_val = HFDataset.from_dict({"text": lines})
++        text_type = "text"
+ 
+     else:
+         try:
+@@ -212,136 +194,125 @@ def build_dataset(train_index_filepath, val_index_filepath,
+             raise Exception("Please specify a valid huggingface dataset.")
+ 
+ 
++    # --- chuẩn hoá flattened paths nếu người dùng truyền "None" hoặc ""
++    if flattened_text_tokenized_path_train in [None, "None", ""]:
++        flattened_text_tokenized_path_train = "cache_train"
++    if flattened_text_tokenized_path_val in [None, "None", ""]:
++        flattened_text_tokenized_path_val = "cache_val"
+ 
++    # ensure folders exist
++    os.makedirs(flattened_text_tokenized_path_train, exist_ok=True)
++    os.makedirs(flattened_text_tokenized_path_val, exist_ok=True)
+ 
+-
+-    if train_dataset_filepath != "": # we want to create a train dataset file. if this check fails, it's because we only want a validation json (not a training json!) for inference purposes.
+-        #tokenize train database
+-        os.makedirs(flattened_text_tokenized_path_train, exist_ok=True)
+-        train_retrieval_database_tokens_path = flattened_text_tokenized_path_train+"/train_retrieval_database_tokens"
++    if train_dataset_filepath != "": 
++        # tokenize train retrieval database (flattened)
++        train_retrieval_database_tokens_path = os.path.join(flattened_text_tokenized_path_train, "train_retrieval_database_tokens.pkl")
+         traintok_file = Path(train_retrieval_database_tokens_path)
+         if traintok_file.is_file():
+             with open(train_retrieval_database_tokens_path, "rb") as fb:
+                 train_retrieval_database_tokens = pickle.load(fb)
++            print(f"✅ Loaded cached train retrieval tokens ({len(train_retrieval_database_tokens)} tokens)")
+         else:
+-            os.makedirs(flattened_text_tokenized_path_train, exist_ok=True)
+-            train_retrieval_database_tokens_path = flattened_text_tokenized_path_train + "/train_retrieval_database_tokens"
+-            traintok_file = Path(train_retrieval_database_tokens_path)
+-
+-            if text_train_tokenized is None and not traintok_file.is_file():
+-                # chỉ token hóa nếu chưa có sẵn hoặc chưa lưu file
++            print("🔹 Tokenizing retrieval DB (this may take a while)...")
++            # .map với num_proc có thể gây vấn đề trên windows; mặc định 1 nếu lỗi
++            try:
+                 text_train_tokenized = text_train_retdb.map(tokenize_function, batched=True, num_proc=1, remove_columns=[text_type])
+-            # Sau khi token hóa
+-            print("🔹 Cleaning tokenized samples...")
+-            text_train_tokenized = [sample for sample in text_train_tokenized if isinstance(sample, list) and len(sample) > 0]
+-            print(f"✅ Cleaned {len(text_train_tokenized)} tokenized samples.")
+-            text_train_tokenized = [y for x in text_train_tokenized for y in x] #flatten it.
+-            train_retrieval_database_tokens = text_train_tokenized
++                text_train_tokenized = [sample["input_ids"] for sample in text_train_tokenized if sample.get("input_ids")]
++                train_retrieval_database_tokens = [y for x in text_train_tokenized for y in x]
++            except Exception as e:
++                # fallback: token hoá theo từng dòng để dễ debug
++                print("⚠️ .map failed, fallback to per-sample tokenization:", e)
++                train_retrieval_database_tokens = []
++                for s in text_train_retdb:
++                    toks = tokenize_function({"text":[s["text"]]})
++                    if toks and "input_ids" in toks:
++                        train_retrieval_database_tokens.extend(toks["input_ids"])
+             with open(train_retrieval_database_tokens_path, "wb") as fp:
+                 pickle.dump(train_retrieval_database_tokens, fp)
++            print(f"✅ Tokenized retrieval DB -> {len(train_retrieval_database_tokens)} tokens saved to {train_retrieval_database_tokens_path}")
+ 
+-        #tokenize train sequence 
+-        train_seq_tokens_path = flattened_text_tokenized_path_train+"/train_seq_tokens"
++        # tokenize train sequence
++        train_seq_tokens_path = os.path.join(flattened_text_tokenized_path_train, "train_seq_tokens.pkl")
+         traintok_file = Path(train_seq_tokens_path)
+         if traintok_file.is_file():
+             with open(train_seq_tokens_path, "rb") as fb:
+                 text_train_tokenized = pickle.load(fb)
++            print(f"✅ Loaded cached train sequence tokens ({len(text_train_tokenized)} tokens)")
+         else:
+-            print("🔹 Tokenizing text_train_seq ...")
+-            text_train_tokenized = []
+-            for sample in text_train_seq:
+-                try:
+-                    toks = tokenize_function({"text": [sample["text"]]})
++            print("🔹 Tokenizing train sequences...")
++            try:
++                seq_toks = text_train_seq.map(tokenize_function, batched=True, num_proc=1, remove_columns=[text_type])
++                text_train_tokenized = [sample["input_ids"] for sample in seq_toks if sample.get("input_ids")]
++                text_train_tokenized = [y for x in text_train_tokenized for y in x]  # flatten
++            except Exception as e:
++                print("⚠️ .map failed for train_seq, fallback to per-sample tokenization:", e)
++                text_train_tokenized = []
++                for s in text_train_seq:
++                    toks = tokenize_function({"text":[s["text"]]})
+                     if toks and "input_ids" in toks:
+                         text_train_tokenized.extend(toks["input_ids"])
+-                except Exception as e:
+-                    continue
+-            print(f"✅ Tokenized {len(text_train_tokenized)} samples.")
+-            # Sau khi token hóa
+-            print("🔹 Cleaning tokenized samples...")
+-            text_train_tokenized = [sample for sample in text_train_tokenized if isinstance(sample, list) and len(sample) > 0]
+-            print(f"✅ Cleaned {len(text_train_tokenized)} tokenized samples.")
+-            text_train_tokenized = [y for x in text_train_tokenized for y in x] #flatten it.
+             with open(train_seq_tokens_path, "wb") as fp:
+                 pickle.dump(text_train_tokenized, fp)
++            print(f"✅ Tokenized train sequences -> {len(text_train_tokenized)} tokens saved to {train_seq_tokens_path}")
+ 
+-        train_index = RetroIndex(device, train_index_filepath, config_json,embedding_type)
+-    
+-    # Training json
+-    if train_dataset_filepath != "": # so we want to save a train dataset
++        train_retrieval_database_tokens = train_retrieval_database_tokens if 'train_retrieval_database_tokens' in locals() else []
++        train_index = RetroIndex(device, train_index_filepath, config_json, embedding_type)
++
++    # --- BUILD SAMPLES ---
++    if train_dataset_filepath != "":
+         sample_offsets_train = []
+         i = 0
+-        while i < len(text_train_tokenized):
+-        # Skip a few tokens to make sure it's not aligned with the neighbors
++        L = len(text_train_tokenized)
++        print(f"🔢 Building samples: total tokens = {L}, chunk_len={chunk_len}, chunks_per_sample={chunks_per_sample}")
++        # --- allow final partial segment instead of dropping it ---
++        while i < L:
+             if skip_range != 0:
+                 skip = np.random.randint(skip_range)
+                 i += skip
+-            # Stop if we've reached the end of the text
+-            if i + chunks_per_sample * chunk_len > len(text_train_tokenized):
++                if i >= L:
++                    break
++            # compute end (allow partial final)
++            end = min(i + chunks_per_sample * chunk_len, L)
++            # require at least 1 token to form a sample
++            if end - i >= 1:
++                sample_offsets_train.append(i)
++            else:
+                 break
+-            sample_offsets_train.append(i)
+-            i += chunks_per_sample * chunk_len
+-        
++            i = end  # move to next block
+ 
++        print(f"✅ Created {len(sample_offsets_train)} sample offsets for training")
+ 
+         sequences_train = []
+-        is_dump_segments = False  #use to split dumps into multiple files to avoid excessive memory use issue
++        is_dump_segments = False
+         dump_sequence_segment = []
+-        # Iterate through the sample offsets
+-        cnt=0
++        cnt = 0
+         totalcnt = len(sample_offsets_train)
+-        nintervals=10
+-        interval_size = totalcnt//nintervals
++        if totalcnt == 0 and L > 0:
++            # fallback: create one sample from start if nothing created
++            sample_offsets_train = [0]
++            totalcnt = 1
++
+         for i in monit.iterate('Gather Neighbors', sample_offsets_train):
+             # Get the sample including an extra token (for prediction)
+             sample = text_train_tokenized[i: i + chunks_per_sample * chunk_len + 1]
+-            # The input
++            if len(sample) < 2:
++                # skip ridiculously small ones
++                continue
+             src = sample[:-1]
+-            # Break it into chunks
+             chunks = [src[j:j + chunk_len] for j in range(0, len(src), chunk_len)]
+-            # Retrieve nearest neighbors
+-            if skip_range == 0: #we didn't skip any tokens thus no need for offsets.
+-                chunk_offsets = None
+-            else:
+-                chunk_offsets = [k + i for k in range(0, len(src), chunk_len)]
+-            D, neighbor_offsets = train_index(chunks, None) #D is the distance matrix       
++            chunk_offsets = None if skip_range == 0 else [k + i for k in range(0, len(src), chunk_len)]
++            D, neighbor_offsets = train_index(chunks, None)
+             D = D.tolist()
+-            
+-            # Get neighbor texts. The neighbor length is twice the `chunk_len`
+             neighbors = [[train_retrieval_database_tokens[j: j + chunk_len * 2] for j in n_off] for n_off in neighbor_offsets]
+-            if is_dump_segments:
+-                dump_sequence_segment.append((sample[:-1], sample[1:], neighbors, D))
+-                if cnt % interval_size == interval_size-1:
+-                    #FIXME pickle dump because of memory error in json dump
+-                    with open(train_dataset_filepath+"temp{}.pkl".format(str(cnt)), "wb") as fp:
+-                        pickle.dump(dump_sequence_segment, fp)
+-                    dump_sequence_segment = [] #empty the list
+-                    print('Gathering neightbors done {} of {}'.format(int(cnt),totalcnt))
+-            else:
+-                sequences_train.append((sample[:-1], sample[1:], neighbors, D))
++            sequences_train.append((sample[:-1], sample[1:], neighbors, D))
++            cnt += 1
+ 
+-            cnt+=1
++        print(f"🔹 Gathered neighbors for {len(sequences_train)} sequences (requested {totalcnt})")
+ 
+-        
+-        if is_dump_segments:
+-            print("Gathering neightbors done")
+-            with open(train_dataset_filepath+"temp{}.pkl".format(str(cnt)), "wb") as fp:
+-                pickle.dump(dump_sequence_segment, fp)
+-        else:
+-            # write out the json
+-            print("Gathering neightbors done")
+-            with open(train_dataset_filepath, 'w', encoding='utf-8') as f:
+-                for sample in sequences_train:
+-                # Each sample is a tuple: (src, tgt, neighbors, D)
+-                # Convert to dict for clarity
+-                    obj = {
+-                    "src": sample[0],
+-                    "tgt": sample[1],
+-                    "neighbors": sample[2],
+-                    "D": sample[3]
+-                    }
+-                    json.dump(obj, f, ensure_ascii=False)
+-                    f.write("\n")
++        # write out the json (as single JSON array)
++        with open(train_dataset_filepath, 'w', encoding='utf-8') as f:
++            json.dump(sequences_train, f, ensure_ascii=False)
++        print(f"💾 Train dataset written to {train_dataset_filepath} with {len(sequences_train)} samples")
+     
+     # Validation json
+     if val_dataset_filepath != "": # so we want to save a val dataset
+@@ -352,14 +323,8 @@ def build_dataset(train_index_filepath, val_index_filepath,
+             with open(val_retrieval_database_tokens_path, "rb") as fb:
+                 val_retrieval_database_tokens = pickle.load(fb)
+         else:
+-            text_train = HFDataset.from_dict({"text": text_train_seq})
+-            text_val = HFDataset.from_dict({"text": text_val})
+-            text_retrieval = HFDataset.from_dict({"text": text_train_retdb})
+             text_train_tokenized = text_train.map(tokenize_function, batched=True, num_proc=8, remove_columns=[text_type])
+-            # Sau khi token hóa
+-            print("🔹 Cleaning tokenized samples...")
+-            text_train_tokenized = [sample for sample in text_train_tokenized if isinstance(sample, list) and len(sample) > 0]
+-            print(f"✅ Cleaned {len(text_train_tokenized)} tokenized samples.")
++            text_train_tokenized = [sample["input_ids"] for sample in text_train_tokenized if sample["input_ids"]!=[]]
+             text_train_tokenized = [y for x in text_train_tokenized for y in x] #flatten it.
+             val_retrieval_database_tokens = text_train_tokenized
+             with open(val_retrieval_database_tokens_path, "wb") as fp:
+@@ -371,8 +336,6 @@ def build_dataset(train_index_filepath, val_index_filepath,
+             with open(val_seq_tokens_path, "rb") as fb:
+                 text_val_tokenized = pickle.load(fb)
+         else:
+-            if isinstance(text_val, list):
+-                text_val = HFDataset.from_dict({"text": text_val})
+             text_val_tokenized = text_val.map(tokenize_function, batched=True, num_proc=8, remove_columns=[text_type])
+             text_val_tokenized = [sample["input_ids"] for sample in text_val_tokenized if sample["input_ids"]!=[]]
+             text_val_tokenized = [y for x in text_val_tokenized for y in x]
+@@ -381,8 +344,6 @@ def build_dataset(train_index_filepath, val_index_filepath,
+             with open(val_seq_tokens_path, "wb") as fp:
+                     pickle.dump(text_val_tokenized, fp)
+ 
+-
+-
+     if val_dataset_filepath != "": # so we want to save a val dataset
+         val_index = RetroIndex(device, val_index_filepath, config_json,embedding_type)
+         for key in text_val_tokenized.keys(): #keep the validation datasets separate
+@@ -421,19 +382,8 @@ def build_dataset(train_index_filepath, val_index_filepath,
+                 sequences_val.append((sample[:-1], sample[1:], neighbors, D))
+                 
+             path = val_dataset_filepath.replace(".json", "-"+str(key)+".json")
+-            print(f"Writing validation dataset as JSONL to {path}...")
+-            with open(path, 'w', encoding='utf-8') as f:
+-                for sample in sequences_val:
+-                    obj = {
+-                    "src": sample[0],
+-                    "tgt": sample[1],
+-                    "neighbors": sample[2],
+-                    "D": sample[3]
+-                    }
+-                    json.dump(obj, f, ensure_ascii=False)
+-                    f.write("\n")
+-            print(f"💾 Validation dataset written line-by-line to {path}")
+-    print(f"🎉 Dataset build completed! Train saved to: {train_dataset_filepath}")
++            with open(path, 'w') as f:
++                f.write(json.dumps(sequences_val))
+     
+ class Dataset(PyTorchDataset):
+     """
+@@ -506,5 +456,4 @@ if __name__ == '__main__':
+                     val_dataset_filepath=args.val_dataset_filepath, device=device, config_json=config_json, 
+                     flattened_text_tokenized_path_train=args.flattened_text_tokenized_path_train, 
+                     flattened_text_tokenized_path_val=args.flattened_text_tokenized_path_val, 
+-                    huggingface_dataset=args.huggingface_dataset, truncation=truncation, embedding_type = args.embedding_type,trainseq_split=trainseq_split)
+-    
++                    huggingface_dataset=args.huggingface_dataset, truncation=truncation, embedding_type = args.embedding_type,trainseq_split=trainseq_split)
+\ No newline at end of file
+diff --git a/retro-li/train.py b/retro-li/train.py
+index 9b6fbb8..ecfb825 100644
+--- a/retro-li/train.py
++++ b/retro-li/train.py
+@@ -1,8 +1,13 @@
++
+ # python retro-li/train.py 
+ #   --random_seed 42 
+-#   --train_dataset_filepath datasets/retroli_train.jsonl 
+-#   --val_dataset_filepath datasets/retroli_val-custom_phukhoa.jsonl
+-#   --config_filepath retro-li/configs/retro_small_model_wikitext103-gpt2-10.json
++#   --train_dataset_filepath datasets/retroli_train.json
++#   --val_dataset_filepath datasets/retroli_val-custom_phukhoa.json
++#   --config_filepath retro-li/configs/minifit/retro_small_model_wikitext103-gpt2-coeff0196-neigh.json
++import sys
++sys.stdout.reconfigure(encoding='utf-8')
++sys.stderr.reconfigure(encoding='utf-8')
++import os
+ import numpy as np
+ import torch
+ from torchinfo import summary
+@@ -26,19 +31,6 @@ from labml_nn.transformers.retro import model as retro
+ from dataset import Dataset, RetroIndex
+ from model import NearestNeighborEncoder, RetroFittedGPT2
+ from transformers import GPT2Tokenizer, GPT2LMHeadModel, GPT2Config
+-
+-class Dataset(torch.utils.data.Dataset):
+-    def __init__(self, filepath):
+-        with open(filepath, "r", encoding="utf-8") as f:
+-            data = json.load(f)  # đọc list lớn
+-        self.samples = data if isinstance(data[0], list) else [data]
+-
+-    def __len__(self):
+-        return len(self.samples)
+-
+-    def __getitem__(self, idx):
+-        return torch.tensor(self.samples[idx])
+-
+ class Trainer:
+     def __init__(self, device: torch.device, model: retro.RetroModel, dataloader: DataLoader, val_dataloader, optimizer: torch.optim.Optimizer, model_dir):
+         self.optimizer = optimizer
+@@ -153,21 +145,19 @@ def train(random_seed, train_dataset_filepath, val_dataset_filepath, device, con
+     lab.configure({"experiments_path":"test/retro/retro_small/"})
+     print(args.val_dataset_filepath)
+     if "minifit" in config_json and config_json["minifit"] == "True" and train_dataset_filepath=="":
+-        val_dataset_full = Dataset(val_dataset_filepath)
+-        train_size = int(len(val_dataset_full) / 10)
+-        train_indices = random.sample(range(len(val_dataset_full)), train_size)
+-        train_subset = torch.utils.data.Subset(val_dataset_full, train_indices)
+-
+-        val_indices = list(set(range(len(val_dataset_full))) - set(train_indices))
+-        val_subset = torch.utils.data.Subset(val_dataset_full, val_indices)
+-
+-        train_dl = DataLoader(train_subset, batch_size=2, shuffle=True)
+-        val_dl = DataLoader(val_dataset, batch_size=config_json["dl_batch_size"], shuffle=False)
+-
++        #infer dataset name from validate filepath
++        experiment_name = 'minifit_'+config_json['minifit']+'_retro_'+config_json['retro']+'_data_'+args.val_dataset_filepath.split('/')[4]
++        val_dataset = Dataset(val_dataset_filepath)
++        train_indices = random.sample(range(0, len(val_dataset)-1), int(len(val_dataset)/10))
++        train_indices.sort(reverse=True)
++        train_dl = DataLoader(val_dataset,batch_size=2,sampler=RandomSampler(train_indices, replacement=False))
++        for i in train_indices:
++            del val_dataset.samples[i]
++        val_dl = DataLoader(val_dataset,batch_size=config_json["dl_batch_size"],sampler=RandomSampler(val_dataset, replacement=False))
+     else:
+-        experiment_name = f"minifit_off_retro_{config_json['retro']}_data_{os.path.basename(args.val_dataset_filepath).replace('.jsonl','')}"
+-        train_dataset = Dataset(train_dataset_filepath)
+-        val_dataset = Dataset(val_dataset_filepath)    
++        val_name = os.path.basename(args.val_dataset_filepath)  # chỉ lấy tên file
++        experiment_name = f"minifit_off_retro_{config_json['retro']}_data_{val_name}"   
++        train_dataset, val_dataset = Dataset(train_dataset_filepath), Dataset(val_dataset_filepath)
+         train_dl, val_dl = DataLoader(train_dataset,batch_size=config_json["dl_batch_size"],sampler=RandomSampler(train_dataset, replacement=False)), DataLoader(val_dataset,batch_size=config_json["dl_batch_size"],sampler=RandomSampler(val_dataset, replacement=False))
+     experiment.create(name=experiment_name)
+     device = torch.device(device)
+@@ -251,8 +241,17 @@ def train(random_seed, train_dataset_filepath, val_dataset_filepath, device, con
+     model = nn.DataParallel(model)
+     model = model.to(device)
+     experiment.add_pytorch_models(model=model)
++    import builtins
++    _original_open = open
++
++    def open_utf8(*args, **kwargs):
++        if 'encoding' not in kwargs:
++            kwargs['encoding'] = 'utf-8'
++        return _original_open(*args, **kwargs)
++
++    builtins.open = open_utf8
+     with experiment.start():
+-        with open(model_dir+'/model_summary.txt', 'w') as f:
++        with open(model_dir+'/model_summary.txt', 'w', encoding='utf-8') as f:
+             f.write(str(summary(model)))
+         with open(model_dir+'/run.yaml', 'a') as fp:
+             yaml.dump(model_configurations, fp)
+@@ -291,4 +290,4 @@ if __name__ == '__main__':
+     torch.backends.cudnn.deterministic = True
+     os.environ["PYTHONHASHSEED"] = str(seed)
+     
+-    train(random_seed=seed, train_dataset_filepath=args.train_dataset_filepath, val_dataset_filepath=args.val_dataset_filepath, device=device, config_json=config_json)
++    train(random_seed=seed, train_dataset_filepath=args.train_dataset_filepath, val_dataset_filepath=args.val_dataset_filepath, device=device, config_json=config_json)
+\ No newline at end of file

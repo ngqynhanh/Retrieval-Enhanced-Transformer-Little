@@ -1,8 +1,13 @@
+
 # python retro-li/train.py 
 #   --random_seed 42 
-#   --train_dataset_filepath datasets/retroli_train.jsonl 
-#   --val_dataset_filepath datasets/retroli_val-custom_phukhoa.jsonl
-#   --config_filepath retro-li/configs/retro_small_model_wikitext103-gpt2-10.json
+#   --train_dataset_filepath datasets/retroli_train.json
+#   --val_dataset_filepath datasets/retroli_val-custom_phukhoa.json
+#   --config_filepath retro-li/configs/minifit/retro_small_model_wikitext103-gpt2-coeff0196-neigh.json
+import sys
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
+import os
 import numpy as np
 import torch
 from torchinfo import summary
@@ -26,19 +31,6 @@ from labml_nn.transformers.retro import model as retro
 from dataset import Dataset, RetroIndex
 from model import NearestNeighborEncoder, RetroFittedGPT2
 from transformers import GPT2Tokenizer, GPT2LMHeadModel, GPT2Config
-
-class Dataset(torch.utils.data.Dataset):
-    def __init__(self, filepath):
-        with open(filepath, "r", encoding="utf-8") as f:
-            data = json.load(f)  # đọc list lớn
-        self.samples = data if isinstance(data[0], list) else [data]
-
-    def __len__(self):
-        return len(self.samples)
-
-    def __getitem__(self, idx):
-        return torch.tensor(self.samples[idx])
-
 class Trainer:
     def __init__(self, device: torch.device, model: retro.RetroModel, dataloader: DataLoader, val_dataloader, optimizer: torch.optim.Optimizer, model_dir):
         self.optimizer = optimizer
@@ -147,28 +139,27 @@ def load_optimizer(model_parameters, config_json):
         optimizer = AdamWarmupCosineDecay(model_parameters)
     else:
         optimizer = torch.optim.AdamW(model_parameters)
-    return optimizer
+    return optimizer 
 def train(random_seed, train_dataset_filepath, val_dataset_filepath, device, config_json):
     model_configurations = {"random_seed": random_seed, "train_dataset_filepath": train_dataset_filepath, "val_dataset_filepath": val_dataset_filepath, "device":device, "config_json":config_json}
-    lab.configure({"experiments_path":"test/retro/retro_small/"})
+    lab.configure({})
     print(args.val_dataset_filepath)
     if "minifit" in config_json and config_json["minifit"] == "True" and train_dataset_filepath=="":
-        val_dataset_full = Dataset(val_dataset_filepath)
-        train_size = int(len(val_dataset_full) / 10)
-        train_indices = random.sample(range(len(val_dataset_full)), train_size)
-        train_subset = torch.utils.data.Subset(val_dataset_full, train_indices)
-
-        val_indices = list(set(range(len(val_dataset_full))) - set(train_indices))
-        val_subset = torch.utils.data.Subset(val_dataset_full, val_indices)
-
-        train_dl = DataLoader(train_subset, batch_size=2, shuffle=True)
-        val_dl = DataLoader(val_dataset, batch_size=config_json["dl_batch_size"], shuffle=False)
-
+        #infer dataset name from validate filepath
+        experiment_name = 'minifit_'+config_json['minifit']+'_retro_'+config_json['retro']+'_data_'+args.val_dataset_filepath.split('/')[4]
+        val_dataset = Dataset(val_dataset_filepath)
+        train_indices = random.sample(range(0, len(val_dataset)-1), int(len(val_dataset)/10))
+        train_indices.sort(reverse=True)
+        train_dl = DataLoader(val_dataset,batch_size=2,sampler=RandomSampler(train_indices, replacement=False))
+        for i in train_indices:
+            del val_dataset.samples[i]
+        val_dl = DataLoader(val_dataset,batch_size=config_json["dl_batch_size"],sampler=RandomSampler(val_dataset, replacement=False))
     else:
-        experiment_name = f"minifit_off_retro_{config_json['retro']}_data_{os.path.basename(args.val_dataset_filepath).replace('.jsonl','')}"
-        train_dataset = Dataset(train_dataset_filepath)
-        val_dataset = Dataset(val_dataset_filepath)    
+        val_name = os.path.basename(args.val_dataset_filepath)  # chỉ lấy tên file
+        experiment_name = f"minifit_off_retro_{config_json['retro']}_data_{val_name}"   
+        train_dataset, val_dataset = Dataset(train_dataset_filepath), Dataset(val_dataset_filepath)
         train_dl, val_dl = DataLoader(train_dataset,batch_size=config_json["dl_batch_size"],sampler=RandomSampler(train_dataset, replacement=False)), DataLoader(val_dataset,batch_size=config_json["dl_batch_size"],sampler=RandomSampler(val_dataset, replacement=False))
+
     experiment.create(name=experiment_name)
     device = torch.device(device)
     model_dir = str(lab.get_experiments_path())+'/'+experiment_name+'/'+str(experiment.get_uuid())
@@ -250,9 +241,18 @@ def train(random_seed, train_dataset_filepath, val_dataset_filepath, device, con
 
     model = nn.DataParallel(model)
     model = model.to(device)
-    experiment.add_pytorch_models(model=model)
+    #experiment.add_models(model=model)
+    import builtins
+    _original_open = open
+
+    def open_utf8(*args, **kwargs):
+        if 'encoding' not in kwargs:
+            kwargs['encoding'] = 'utf-8'
+        return _original_open(*args, **kwargs)
+
+    builtins.open = open_utf8
     with experiment.start():
-        with open(model_dir+'/model_summary.txt', 'w') as f:
+        with open(model_dir+'/model_summary.txt', 'w', encoding='utf-8') as f:
             f.write(str(summary(model)))
         with open(model_dir+'/run.yaml', 'a') as fp:
             yaml.dump(model_configurations, fp)

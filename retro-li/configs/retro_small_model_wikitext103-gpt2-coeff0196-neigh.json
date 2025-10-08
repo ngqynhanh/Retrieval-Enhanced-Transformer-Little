@@ -31,7 +31,5 @@
     "noisy_embed_neighbors": "True",
     "noise_coeff": 0.196,
     "minifit": "False",
-    "true_retrofit": "True",
-    "train_dataset": "dataset.TokenDataset",
-    "val_dataset": "dataset.TokenDataset"
+    "true_retrofit": "True"
 }
